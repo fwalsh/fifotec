@@ -1,0 +1,8 @@
+uwsgi:
+  image: "fwalsh/fifotec-uwsgi:${CIRCLE_SHA1}"
+nginx:
+  image: "fwalsh/fifotec-nginx:${CIRCLE_SHA1}"
+  links:
+    - uwsgi
+  ports:
+    - "${NGINX_PORT}"
