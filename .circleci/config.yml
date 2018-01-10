@@ -1,0 +1,88 @@
+version: 2
+jobs:
+  build:
+    working_directory: ~/fifotec
+    environment:
+      IMAGE_TAG: ${CIRCLE_SHA1}
+
+    # In 2.0, we specify our Ruby version by using a public Docker image
+    docker:
+       - image: gerey/saasdemo-docker-image:latest
+
+    steps:
+      - checkout
+
+      - setup_remote_docker:
+          reusable: true
+
+      - run: docker build -t {DOCKER_USER}/fifotec-uwsgi:${CIRCLE_SHA1} uwsgi
+      - run: docker build -t {DOCKER_USER}/fifotec-nginx:${CIRCLE_SHA1} nginx
+
+
+      #push docker iamge to docker hub
+      - run: docker login -u $DOCKER_USER -p $DOCKER_PASS
+      - run: docker push {DOCKER_USER}/fifotec-uwsgi:${CIRCLE_SHA1}
+      - run: docker push {DOCKER_USER}/fifotec-nginx:${CIRCLE_SHA1}
+
+
+
+
+  test:
+    working_directory: ~/fifotec
+    docker:
+       - image: gerey/saasdemo-docker-image:latest
+
+    steps:
+      - checkout
+
+      - setup_remote_docker:
+          reusable: true
+
+      # - attach_workspace:
+      #   at: /var/lib/docker
+      - run: docker pull {DOCKER_USER}/fifotec-uwsgi:${CIRCLE_SHA1}
+      - run: docker pull {DOCKER_USER}/fifotec-nginx:${CIRCLE_SHA1}
+      - run: docker build -t {DOCKER_USER}-test test
+      - run: xxd -l 8 -p /dev/urandom > test_container_name
+      - run: docker-compose -p ${CIRCLE_BUILD_NUM} up -d
+      - run: docker run --link ${CIRCLE_BUILD_NUM}_nginx_1:nginx --name $(cat test_container_name) {DOCKER_USER}-test
+
+      - run:
+          when: always
+          command: |
+            mkdir test-reports
+            docker cp $(cat test_container_name):/nosetests.xml test-reports/.
+            docker-compose kill || true
+
+      - store_artifacts:
+            path: test-reports
+
+      - store_test_results:
+          path: test-reports/
+
+  deploy:
+    name: Deploy to ECS
+    working_directory: ~/fifotec
+    docker:
+      - image: gerey/saasdemo-docker-image:latest
+
+    steps:
+      - checkout
+
+      - run: script/deploy.sh prod
+
+workflows:
+  version: 2
+  test-and-deploy:
+    jobs:
+      - build
+      - test:
+          requires:
+            - build
+      - deploy:
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - master
